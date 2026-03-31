@@ -158,6 +158,16 @@ router.post('/excel', uploadExcel.single('file'), async function (req, res, next
     }
 })
 
+// Xóa users bị import lỗi (email = "[object Object]")
+router.delete('/users/cleanup', async function (req, res, next) {
+    try {
+        let deleted = await usersModel.deleteMany({ email: "[object Object]" })
+        res.send({ message: `Đã xóa ${deleted.deletedCount} users lỗi` })
+    } catch (err) {
+        next(err)
+    }
+})
+
 router.post('/users', uploadExcel.single('file'), async function (req, res, next) {
     if (!req.file) {
         return res.status(404).send({ message: "file not found" })
@@ -187,6 +197,10 @@ router.post('/users', uploadExcel.single('file'), async function (req, res, next
                 continue
             }
 
+            // Xử lý ExcelJS hyperlink/rich-text object -> lấy text thực
+            if (typeof username === 'object') username = username.text || username.richText?.map(r => r.text).join('') || String(username)
+            if (typeof email === 'object') email = email.text || email.hyperlink || email.richText?.map(r => r.text).join('') || String(email)
+
             username = String(username).trim()
             email = String(email).trim()
 
@@ -210,10 +224,15 @@ router.post('/users', uploadExcel.single('file'), async function (req, res, next
                 })
                 await newUser.save()
 
-                // Gửi email
-                await sendPasswordMail(email, username, rawPassword)
+                // Gửi email (không fail user nếu mail lỗi)
+                let mailStatus = 'sent'
+                try {
+                    await sendPasswordMail(email, username, rawPassword)
+                } catch (mailErr) {
+                    mailStatus = 'mail_error: ' + mailErr.message
+                }
 
-                result.push({ row: index, success: true, username, email })
+                result.push({ row: index, success: true, username, email, mailStatus })
             } catch (err) {
                 result.push({ row: index, success: false, error: err.message })
             }
