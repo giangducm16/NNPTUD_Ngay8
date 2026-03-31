@@ -75,40 +75,34 @@ router.post('/', CheckLogin, uploadFile.single('file'), async function (req, res
 router.get('/', CheckLogin, async function (req, res, next) {
     try {
         let currentUserId = req.user._id;
-        let messages = await messageModel.aggregate([
-            {
-                $match: {
-                    $or: [
-                        { from: currentUserId },
-                        { to: currentUserId }
-                    ]
-                }
-            },
-            {
-                $sort: { createdAt: -1 }
-            },
-            {
-                $group: {
-                    _id: {
-                        $cond: [
-                             { $eq: ["$from", currentUserId] },
-                             "$to",
-                             "$from"
-                        ]
-                    },
-                    message: { $first: "$$ROOT" }
-                }
-            },
-            {
-                $replaceRoot: { newRoot: "$message" }
-            },
-            {
-                $sort: { createdAt: -1 }
-            }
-        ]);
         
-        // Mở rộng thêm thông tin from/to nếu cần
-        await messageModel.populate(messages, { path: "from to", select: "username fullName avatarUrl email" });
+        // Lấy tất cả tin nhắn chứa user hiện tại, sort giảm dần theo thời gian
+        let allMessages = await messageModel.find({
+            $or: [
+                { from: currentUserId },
+                { to: currentUserId }
+            ]
+        })
+        .sort({ createdAt: -1 })
+        .populate("from to", "username fullName avatarUrl email");
+
+        let contactMap = new Map();
+        
+        // Duyệt qua mảng tin nhắn đã được sắp xếp giảm dần (mới nhất nằm trước)
+        for (let msg of allMessages) {
+            // Xác định ID của đối phương (nếu from là user hiện tại thì lấy to, ngược lại lấy from)
+            let contactId = msg.from._id.toString() === currentUserId.toString() 
+                ? msg.to._id.toString() 
+                : msg.from._id.toString();
+                
+            // Nếu liên hệ này chưa có trong Map => Đây là tin nhắn mới nhất
+            if (!contactMap.has(contactId)) {
+                contactMap.set(contactId, msg);
+            }
+        }
+        
+        // Chuyển kết quả từ Map sang Array
+        let messages = Array.from(contactMap.values());
         
         res.send(messages);
     } catch (error) {
